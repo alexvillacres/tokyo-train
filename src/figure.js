@@ -1,7 +1,7 @@
 // A passenger, seen from behind.
 //
 // Units are head radii. The body is stored as (x, h) with h measured up from
-// the feet; the head is stored relative to the neck with y pointing up.
+// the floor; the head is stored relative to the neck with y pointing up.
 // At draw time the body is bent sideways by `lean` and the head is turned by
 // `lean` plus its own lagging `nod`, so the head trails the shoulders.
 
@@ -10,7 +10,7 @@ import { spline, wobble, fromPairs, trace, tracePolygon } from './brush.js';
 const TAU = Math.PI * 2;
 
 export function buildFigure(rng) {
-  const neck = rng.range(5.4, 7.2); // feet to neck
+  const neck = rng.range(11.2, 13.4); // floor to neck
   const shoulder = rng.range(1.35, 1.9); // half-width
   const hem = shoulder * rng.range(0.45, 0.8);
   const drop = rng.range(0.5, 0.9);
@@ -178,20 +178,31 @@ export function buildFigure(rng) {
   };
 }
 
-// Draw one figure. (fx, fy) is where the feet are on screen, s is pixels per
-// head radius.
-export function drawFigure(ctx, f, fx, fy, s, style) {
+// Draw one figure. `foot` and `top` are the projected floor point and neck
+// point (before any lean), each [screenX, screenY, pixels per head radius].
+// The body is stretched between the two, so it picks up the camera's
+// perspective: slightly larger at the shoulders than at the feet, and tipped
+// outward away from the middle of the picture.
+export function drawFigure(ctx, f, foot, top, style) {
   const reach = f.lean * f.neck;
+  const x0 = foot[0];
+  const y0 = foot[1];
+  const s0 = foot[2];
+  const ax = top[0] - x0;
+  const ay = top[1] - y0;
+  const as = top[2] - s0;
 
   const bodyTf = (x, h, out) => {
-    const t = h > 0 ? h / f.neck : 0;
-    out[0] = fx + s * (x + reach * Math.pow(t, 1.4));
-    out[1] = fy - s * h;
+    const t = h / f.neck;
+    const bend = t > 0 ? reach * Math.pow(t, 1.4) : 0;
+    out[0] = x0 + ax * t + (s0 + as * t) * (x + bend);
+    out[1] = y0 + ay * t;
   };
 
-  const nx = fx + s * reach;
-  const ny = fy - s * f.neck;
-  const turn = f.lean * 0.5 + f.nod;
+  const s = top[2];
+  const nx = top[0] + s * reach;
+  const ny = top[1];
+  const turn = f.lean * 0.5 + f.nod + Math.atan2(ax, -ay);
   const cos = Math.cos(turn);
   const sin = Math.sin(turn);
   const headTf = (x, y, out) => {

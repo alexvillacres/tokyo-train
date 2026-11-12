@@ -8,32 +8,50 @@
 // apart when they lean into one another, which passes a bump along the row.
 
 import { createRng } from './rng.js';
-import { spline, wobble, trace } from './brush.js';
+import { trace } from './brush.js';
+import { createCamera } from './camera.js';
+import { CAR, buildCar } from './car.js';
 import { buildFigure, drawFigure } from './figure.js';
 import { buildStrap, drawStrap } from './strap.js';
 
 const PAPER = '#ece6d8';
 const INK = '27, 26, 24';
-const GRID = 'rgba(70, 96, 120, 0.13)';
+const GUIDE = 'rgba(70, 96, 120, 0.2)';
 
-const ROWS = [7, 6, 6, 5, 4, 4]; // back to front
+// Figures and handles are drawn in head radii; this is one head radius in
+// metres, which is what puts them in the car at the right size.
+const HEAD = 0.115;
+
+// The standing crowd, in car coordinates (metres).
+const ROW_COUNT = 11;
+const ROW_START = 0.7; // camera to the nearest row
+const ROW_GAP = 0.56; // row to row, along the car
+const ACROSS = 0.52; // shoulder to shoulder, across the car
+const STRAP_START = 0.9;
+const STRAP_GAP = 0.6;
+
 const CAR_FOLLOW = 7; // how briskly the car chases the cursor (rad/s)
-const LEAN_GAIN = 0.011; // lean per unit of car acceleration
+const CAR_SWAY = 0.035; // how far the car slides past the camera (metres)
+const LEAN_GAIN = 0.006; // lean per unit of car acceleration
 const HEAD_GAIN = 0.02;
 const STRAP_GAIN = 0.019;
 const STEP = 1 / 120;
 
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const same = (x, y, out) => {
+  out[0] = x;
+  out[1] = y;
+};
 
 export function createScene(seed = 4509) {
+  const cam = createCamera();
   let W = 0;
   let H = 0;
   let figures = [];
   let rows = [];
   let straps = [];
-  let rails = [];
-  let gridStep = 26;
+  let car = { guides: [], rails: [] };
 
   // Car state. Position is in half-screens: -1 is the left edge, 1 the right.
   let carX = 0;
@@ -48,61 +66,45 @@ export function createScene(seed = 4509) {
   let nextClack = 1.5;
   let secondClack = false;
 
+  // Everything is placed in the car, not on the screen, so the screen size
+  // only matters to the camera.
   function layout(width, height) {
     W = width;
     H = height;
+    cam.fit(W, H);
     const rng = createRng(seed);
-    const unit = clamp(Math.sqrt(W * H) * 0.045, 20, 60);
-    const aspect = clamp(W / H / 1.4, 0.55, 1.5);
-    gridStep = clamp(Math.round(unit * 0.55), 16, 30);
 
     figures = [];
     rows = [];
-    ROWS.forEach((base, r) => {
-      const z = r / (ROWS.length - 1); // 0 far, 1 near
-      const count = Math.max(2, Math.round(base * aspect));
-      const s = unit * lerp(0.42, 1.75, Math.pow(z, 1.25));
-      const half = W * lerp(0.26, 0.62, z);
-      const spacing = (half * 2) / count;
-      const stagger = r % 2 ? spacing * 0.5 : 0;
-      const headY = H * lerp(0.26, 0.98, z);
+    for (let r = 0; r < ROW_COUNT; r++) {
+      const count = r % 2 ? 4 : 5; // alternate rows stand in the gaps
       const row = [];
       for (let i = 0; i < count; i++) {
         const f = buildFigure(rng);
-        f.z = z;
-        f.s = s;
-        f.x = W / 2 - half + spacing * (i + 0.5) + stagger - spacing * 0.25 + rng.range(-0.22, 0.22) * spacing;
-        f.y = headY + rng.range(-0.022, 0.022) * H * (0.5 + z) + s * (f.neck + 0.85);
+        f.x = (i - (count - 1) / 2) * ACROSS + rng.range(-0.09, 0.09);
+        f.z = ROW_START + r * ROW_GAP + rng.range(-0.12, 0.12);
         row.push(f);
         figures.push(f);
       }
       row.sort((a, b) => a.x - b.x);
       rows.push(row);
-    });
-    figures.sort((a, b) => a.z - b.z || a.y - b.y);
+    }
+    figures.sort((a, b) => b.z - a.z); // far to near, the order they are drawn
 
-    // Two rails running away from the viewer, with handles hanging off them.
+    car = buildCar(rng);
+
+    // Handles hang off both rails at regular intervals down the car.
     straps = [];
-    rails = [];
-    for (const dir of [-1, 1]) {
-      const near = [W / 2 + dir * W * 0.49, -H * 0.04];
-      const far = [W / 2 + dir * W * 0.12, H * 0.125];
-      for (const offset of [0, unit * 0.16]) {
-        const a = [near[0] + dir * W * 0.12, near[1] - H * 0.05 + offset];
-        const b = [lerp(near[0], far[0], 0.5), lerp(near[1], far[1], 0.5) + offset * 0.6];
-        const c = [far[0] - dir * W * 0.03, far[1] + H * 0.012 + offset * 0.3];
-        rails.push(wobble(spline([a, b, c], 10), rng, unit * 0.035, 2));
-      }
-      for (const t of [0.1, 0.32, 0.52, 0.7, 0.86]) {
+    for (let z = STRAP_START; z < CAR.length - 0.3; z += STRAP_GAP) {
+      for (const dir of [-1, 1]) {
         const strap = buildStrap(rng);
-        strap.x = lerp(near[0], far[0], t);
-        strap.y = lerp(near[1], far[1], t) + unit * 0.1;
-        strap.z = 1 - t;
-        strap.s = unit * lerp(1.45, 0.4, t);
+        strap.x = dir * CAR.railX;
+        strap.y = CAR.railY - 0.035;
+        strap.z = z + rng.range(-0.04, 0.04);
         straps.push(strap);
       }
     }
-    straps.sort((a, b) => a.z - b.z);
+    straps.sort((a, b) => b.z - a.z);
   }
 
   function trackNoise(h) {
@@ -135,10 +137,10 @@ export function createScene(seed = 4509) {
       for (let i = 0; i < row.length - 1; i++) {
         const a = row[i];
         const b = row[i + 1];
-        const reachA = a.s * a.neck;
-        const reachB = b.s * b.neck;
+        const reachA = HEAD * a.neck;
+        const reachB = HEAD * b.neck;
         const rest = b.x - a.x;
-        const room = Math.min(rest * 0.85, (a.shoulder * a.s + b.shoulder * b.s) * 0.9);
+        const room = Math.min(rest * 0.85, (a.shoulder + b.shoulder) * HEAD * 0.9);
         const gap = rest + b.lean * reachB - a.lean * reachA;
         if (gap < room) {
           const closing = a.leanVel * reachA - b.leanVel * reachB;
@@ -186,6 +188,25 @@ export function createScene(seed = 4509) {
     }
   }
 
+  const foot = [0, 0, 0];
+  const top = [0, 0, 0];
+  const point = [0, 0, 0];
+  const scratch = new Float32Array(64);
+
+  // How boldly to draw something: 1 up close, 0 at the far end of the car.
+  const nearness = (pixelsPerMetre) => clamp((7.5 - cam.focal / pixelsPerMetre) / 5.5, 0, 1);
+
+  // Project a 3D line and add it to the current path.
+  function traceLine(ctx, line, wobblePx) {
+    const n = line.pts.length / 3;
+    for (let i = 0; i < n; i++) {
+      cam.project(line.pts[i * 3], line.pts[i * 3 + 1], line.pts[i * 3 + 2], point);
+      scratch[i * 2] = point[0] + line.jitter[i * 2] * wobblePx;
+      scratch[i * 2 + 1] = point[1] + line.jitter[i * 2 + 1] * wobblePx;
+    }
+    trace(ctx, scratch.subarray(0, n * 2), same);
+  }
+
   function draw(ctx) {
     ctx.fillStyle = PAPER;
     ctx.fillRect(0, 0, W, H);
@@ -193,46 +214,48 @@ export function createScene(seed = 4509) {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    // The car slides with the cursor; nearer things slide further.
-    const slide = carX * W * 0.03;
+    // The car slides with the cursor. Moving the camera the other way does
+    // it, and nearer things slide further on their own.
+    cam.x = -carX * CAR_SWAY;
 
     for (const f of figures) {
-      drawFigure(ctx, f, f.x + slide * (0.35 + 0.65 * f.z), f.y, f.s, {
+      cam.project(f.x, 0, f.z, foot);
+      cam.project(f.x, f.neck * HEAD, f.z, top);
+      const near = nearness(top[2]);
+      foot[2] *= HEAD;
+      top[2] *= HEAD;
+      drawFigure(ctx, f, foot, top, {
         paper: PAPER,
-        ink: `rgba(${INK}, ${lerp(0.6, 0.95, f.z)})`,
-        width: lerp(1.1, 2.2, f.z),
+        ink: `rgba(${INK}, ${lerp(0.5, 0.95, near)})`,
+        width: lerp(0.9, 2.2, near),
       });
     }
 
-    const railSlide = slide * 0.5;
-    const railTf = (x, y, out) => {
-      out[0] = x + railSlide;
-      out[1] = y;
-    };
     ctx.strokeStyle = `rgba(${INK}, 0.6)`;
     ctx.lineWidth = 1.2;
     ctx.beginPath();
-    for (const rail of rails) trace(ctx, rail, railTf);
+    for (const rail of car.rails) traceLine(ctx, rail, 1.4);
     ctx.stroke();
 
     for (const s of straps) {
-      ctx.strokeStyle = `rgba(${INK}, ${lerp(0.5, 0.9, s.z)})`;
-      ctx.lineWidth = lerp(1, 1.8, s.z);
-      drawStrap(ctx, s, s.x + railSlide, s.y, s.s);
+      cam.project(s.x, s.y, s.z, point);
+      const near = nearness(point[2]);
+      ctx.strokeStyle = `rgba(${INK}, ${lerp(0.45, 0.9, near)})`;
+      ctx.lineWidth = lerp(0.8, 1.8, near);
+      drawStrap(ctx, s, point[0], point[1], point[2] * HEAD);
     }
 
-    // Notebook grid, ruled over the top so the paper fills don't erase it.
-    ctx.strokeStyle = GRID;
+    // Construction lines, ruled over the top so the paper fills don't erase
+    // them, with a small cross where they meet.
+    ctx.strokeStyle = GUIDE;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    for (let x = (W / 2) % gridStep; x < W; x += gridStep) {
-      ctx.moveTo(Math.round(x) + 0.5, 0);
-      ctx.lineTo(Math.round(x) + 0.5, H);
-    }
-    for (let y = gridStep * 0.5; y < H; y += gridStep) {
-      ctx.moveTo(0, Math.round(y) + 0.5);
-      ctx.lineTo(W, Math.round(y) + 0.5);
-    }
+    for (const guide of car.guides) traceLine(ctx, guide, 0.5);
+    cam.vanishingPoint(point);
+    ctx.moveTo(point[0] - 7, point[1]);
+    ctx.lineTo(point[0] + 7, point[1]);
+    ctx.moveTo(point[0], point[1] - 7);
+    ctx.lineTo(point[0], point[1] + 7);
     ctx.stroke();
   }
 

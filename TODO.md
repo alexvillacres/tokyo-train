@@ -4,10 +4,10 @@ In suggested order. Each step builds on the one before it.
 
 ## 1. Real perspective
 
-- [ ] Model the car as a simple 3D box (floor, walls, ceiling) with one camera and one `project()` function
-- [ ] Place passengers, rails and handles in car coordinates instead of hand-tuned rows
-- [ ] Keep the camera raised and tilted down so the crowd stays readable
-- [ ] Replace the graph paper with very light perspective construction lines running to the vanishing point
+- [x] Model the car as a simple 3D box (floor, walls, ceiling) with one camera and one `project()` function
+- [x] Place passengers, rails and handles in car coordinates instead of hand-tuned rows
+- [x] Keep the camera raised and tilted down so the crowd stays readable
+- [x] Replace the graph paper with very light perspective construction lines running to the vanishing point
 
 ## 2. The car
 
