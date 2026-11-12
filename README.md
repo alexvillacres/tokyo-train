@@ -4,17 +4,18 @@ A canvas study: a crowded train car drawn in pen, seen from behind. Move the
 cursor left and right and the car moves with it; the passengers lean, overshoot
 and settle, and the strap handles swing.
 
-Plain HTML, CSS and JavaScript modules. No dependencies and no build step.
+Plain HTML, CSS and JavaScript modules, served and bundled with Vite.
 
 ## Run it
 
-Modules need to be served over HTTP, so open it through any static server:
-
 ```sh
-npx serve .
-# or
-python3 -m http.server
+pnpm install
+pnpm dev       # dev server with hot reload
+pnpm build     # bundle into dist/
+pnpm preview   # serve the built dist/ locally
 ```
+
+`dist/` uses relative paths, so it can be hosted from any folder or subpath.
 
 ## How it works
 
