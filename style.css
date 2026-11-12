@@ -1,0 +1,33 @@
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: #ece6d8;
+  overflow: hidden;
+}
+
+canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  touch-action: none;
+  cursor: ew-resize;
+}
+
+.caption {
+  position: fixed;
+  left: 50%;
+  top: 18px;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 3px 10px;
+  background: #ece6d8;
+  color: #1b1a18;
+  font: 500 11px/1.4 ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
