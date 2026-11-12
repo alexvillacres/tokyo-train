@@ -24,7 +24,7 @@ pnpm preview   # serve the built dist/ locally
 | `src/rng.js` | Seeded random numbers, so the same crowd is drawn every time |
 | `src/brush.js` | The pen: splines, a one-time wobble, and cheap path drawing |
 | `src/camera.js` | The viewpoint and `project()`, which turns car coordinates into screen points |
-| `src/car.js` | The car as a box: its size, construction lines and handle rails |
+| `src/car.js` | The car as a box: its size, construction lines, handle rails, side walls and end door |
 | `src/figure.js` | Builds and draws one passenger (body, head, hair) |
 | `src/strap.js` | Builds and draws one hanging handle |
 | `src/scene.js` | Who stands where, physics and drawing order |
@@ -40,6 +40,11 @@ those coordinates, and one camera projects them to the screen. The camera sits
 above head height and tilts down, so the vanishing point is in the upper part of
 the picture. The light blue lines are the construction lines of that box.
 
+**The next car.** The door in the end wall has a window, and the next car is
+drawn through it: its own door, and its passengers through that. It follows
+this car on a slower, springier spring, so for a moment after each move the two
+doors are out of line.
+
 **Physics.** The car's sideways position chases the cursor, and the car's
 acceleration is the only force. Each passenger is a damped spring leaning
 against it, each head is a faster spring riding on the shoulders, and each
@@ -54,6 +59,9 @@ is switched off when the system asks for reduced motion.
   `src/car.js`.
 - Crowd spacing (`ROW_COUNT`, `ROW_GAP`, `ACROSS`) and motion (`LEAN_GAIN`,
   `HEAD_GAIN`, `STRAP_GAIN`, `CAR_FOLLOW`, `CAR_SWAY`) at the top of
-  `src/scene.js`.
+  `src/scene.js`, along with how the next car trails (`NEXT_FOLLOW`,
+  `NEXT_DAMPING`, `NEXT_SWAY`).
+- Door and window positions (`END_DOOR`, `SIDE_DOORS`, `SIDE_BAYS`) at the top
+  of `src/car.js`.
 - Per-person ranges (`freq`, `damping`, `weight`) at the bottom of
   `buildFigure` in `src/figure.js`.

@@ -11,9 +11,9 @@ In suggested order. Each step builds on the one before it.
 
 ## 2. The car
 
-- [ ] Door at the far end leading to the next car, centred on the vanishing point
-- [ ] Hint of the next car through the door window, swaying slightly out of step
-- [ ] Wall details: windows, side doors, luggage racks (only as much as the drawing needs)
+- [x] Door at the far end leading to the next car, centred on the vanishing point
+- [x] Hint of the next car through the door window, swaying slightly out of step
+- [x] Wall details: windows, side doors, luggage racks (only as much as the drawing needs)
 
 ## 3. More people
 

@@ -10,7 +10,7 @@
 import { createRng } from './rng.js';
 import { trace } from './brush.js';
 import { createCamera } from './camera.js';
-import { CAR, buildCar } from './car.js';
+import { CAR, buildCar, buildFittings } from './car.js';
 import { buildFigure, drawFigure } from './figure.js';
 import { buildStrap, drawStrap } from './strap.js';
 
@@ -35,6 +35,13 @@ const CAR_SWAY = 0.035; // how far the car slides past the camera (metres)
 const LEAN_GAIN = 0.006; // lean per unit of car acceleration
 const HEAD_GAIN = 0.02;
 const STRAP_GAIN = 0.019;
+
+// The next car is coupled to this one, so it makes the same moves a moment
+// later and overshoots them. The difference is what shows through the door.
+const NEXT_FOLLOW = 4.2; // rad/s, slower than CAR_FOLLOW
+const NEXT_DAMPING = 0.45;
+const NEXT_SWAY = 0.2; // metres of offset per half-screen it is behind
+const NEXT_ROWS = 7;
 const STEP = 1 / 120;
 
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -52,10 +59,15 @@ export function createScene(seed = 4509) {
   let rows = [];
   let straps = [];
   let car = { guides: [], rails: [] };
+  let fittings = { walls: [], door: { lines: [], glass: [] }, next: { lines: [], glass: [] } };
+  let beyond = []; // passengers in the next car
 
   // Car state. Position is in half-screens: -1 is the left edge, 1 the right.
   let carX = 0;
   let carVel = 0;
+  let nextX = 0;
+  let nextVel = 0;
+  let nextDrift = 0; // metres; the two cars never ride the track quite alike
   let time = 0;
   let carry = 0;
 
@@ -105,6 +117,22 @@ export function createScene(seed = 4509) {
       }
     }
     straps.sort((a, b) => b.z - a.z);
+
+    // Built last, so the crowd above is the same crowd as before.
+    fittings = buildFittings(rng);
+
+    beyond = [];
+    const nextStart = CAR.length + CAR.gangway + 0.45;
+    for (let r = 0; r < NEXT_ROWS; r++) {
+      const count = r % 2 ? 2 : 3;
+      for (let i = 0; i < count; i++) {
+        const f = buildFigure(rng);
+        f.x = (i - (count - 1) / 2) * ACROSS + rng.range(-0.09, 0.09);
+        f.z = nextStart + r * ROW_GAP + rng.range(-0.12, 0.12);
+        beyond.push(f);
+      }
+    }
+    beyond.sort((a, b) => b.z - a.z);
   }
 
   function trackNoise(h) {
@@ -120,6 +148,28 @@ export function createScene(seed = 4509) {
       secondClack = !secondClack;
     }
     return 0.45 * (Math.sin(time * 11.3) + Math.sin(time * 17.9 + 1) + Math.sin(time * 7.1 + 2)) + kick;
+  }
+
+  // One passenger: a spring for the lean, and a faster one for the head.
+  function sway(f, acc, h) {
+    const k = f.freq * f.freq;
+    const leanAcc =
+      -k * f.lean -
+      k * 8 * f.lean * f.lean * f.lean - // stiffens at the extremes, so nobody falls over
+      2 * f.damping * f.freq * f.leanVel -
+      LEAN_GAIN * f.weight * acc +
+      f.push;
+    f.leanVel += leanAcc * h;
+    f.lean += f.leanVel * h;
+
+    const kh = f.headFreq * f.headFreq;
+    const nodAcc =
+      -kh * f.nod -
+      2 * f.headDamping * f.headFreq * f.nodVel -
+      HEAD_GAIN * f.headWeight * acc -
+      0.45 * leanAcc; // the head is late to follow the shoulders
+    f.nodVel += nodAcc * h;
+    f.nod += f.nodVel * h;
   }
 
   function tick(h, target, rumble) {
@@ -151,26 +201,14 @@ export function createScene(seed = 4509) {
       }
     }
 
-    for (const f of figures) {
-      const k = f.freq * f.freq;
-      const leanAcc =
-        -k * f.lean -
-        k * 8 * f.lean * f.lean * f.lean - // stiffens at the extremes, so nobody falls over
-        2 * f.damping * f.freq * f.leanVel -
-        LEAN_GAIN * f.weight * acc +
-        f.push;
-      f.leanVel += leanAcc * h;
-      f.lean += f.leanVel * h;
+    for (const f of figures) sway(f, acc, h);
 
-      const kh = f.headFreq * f.headFreq;
-      const nodAcc =
-        -kh * f.nod -
-        2 * f.headDamping * f.headFreq * f.nodVel -
-        HEAD_GAIN * f.headWeight * acc -
-        0.45 * leanAcc; // the head is late to follow the shoulders
-      f.nodVel += nodAcc * h;
-      f.nod += f.nodVel * h;
-    }
+    // The next car, and the people in it, who feel its movement, not ours.
+    const nextAcc = NEXT_FOLLOW * NEXT_FOLLOW * (carX - nextX) - 2 * NEXT_DAMPING * NEXT_FOLLOW * nextVel;
+    nextVel += nextAcc * h;
+    nextX += nextVel * h;
+    nextDrift = rumble ? 0.012 * (Math.sin(time * 2.3 + 1) + Math.sin(time * 3.7)) : 0;
+    for (const f of beyond) sway(f, nextAcc * 30, h);
 
     for (const s of straps) {
       const swingAcc = -s.freq * s.freq * Math.sin(s.swing) - 0.16 * s.freq * s.swingVel - STRAP_GAIN * acc;
@@ -191,20 +229,73 @@ export function createScene(seed = 4509) {
   const foot = [0, 0, 0];
   const top = [0, 0, 0];
   const point = [0, 0, 0];
-  const scratch = new Float32Array(64);
+  const scratch = new Float32Array(96);
 
   // How boldly to draw something: 1 up close, 0 at the far end of the car.
   const nearness = (pixelsPerMetre) => clamp((7.5 - cam.focal / pixelsPerMetre) / 5.5, 0, 1);
 
-  // Project a 3D line and add it to the current path.
-  function traceLine(ctx, line, wobblePx) {
+  // Project a 3D line and add it to the current path. `shift` moves it
+  // across the car first, in metres.
+  function traceLine(ctx, line, wobblePx, shift = 0) {
     const n = line.pts.length / 3;
     for (let i = 0; i < n; i++) {
-      cam.project(line.pts[i * 3], line.pts[i * 3 + 1], line.pts[i * 3 + 2], point);
+      cam.project(line.pts[i * 3] + shift, line.pts[i * 3 + 1], line.pts[i * 3 + 2], point);
       scratch[i * 2] = point[0] + line.jitter[i * 2] * wobblePx;
       scratch[i * 2 + 1] = point[1] + line.jitter[i * 2 + 1] * wobblePx;
     }
     trace(ctx, scratch.subarray(0, n * 2), same);
+  }
+
+  // Limit drawing to what shows through a pane of glass.
+  function clipTo(ctx, glass, shift = 0) {
+    ctx.beginPath();
+    for (let i = 0; i < glass.length; i++) {
+      cam.project(glass[i][0] + shift, glass[i][1], glass[i][2], point);
+      if (i) ctx.lineTo(point[0], point[1]);
+      else ctx.moveTo(point[0], point[1]);
+    }
+    ctx.closePath();
+    ctx.clip();
+  }
+
+  function drawFigureAt(ctx, f, shift, style) {
+    cam.project(f.x + shift, 0, f.z, foot);
+    cam.project(f.x + shift, f.neck * HEAD, f.z, top);
+    foot[2] *= HEAD;
+    top[2] *= HEAD;
+    drawFigure(ctx, f, foot, top, style);
+  }
+
+  // The walls and the far door go down first: everyone stands in front of them.
+  function drawFittings(ctx) {
+    const { walls, door, next } = fittings;
+
+    ctx.strokeStyle = `rgba(${INK}, 0.4)`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (const line of walls) traceLine(ctx, line, 1);
+    ctx.stroke();
+
+    // The next car, through the glass: its own door, then its passengers
+    // through that. It sits off to one side by however far it is behind.
+    const shift = (nextX - carX) * NEXT_SWAY + nextDrift;
+    ctx.save();
+    clipTo(ctx, door.glass);
+    ctx.strokeStyle = `rgba(${INK}, 0.4)`;
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    for (const line of next.lines) traceLine(ctx, line, 0.6, shift);
+    ctx.stroke();
+    clipTo(ctx, next.glass, shift);
+    const style = { paper: PAPER, ink: `rgba(${INK}, 0.4)`, width: 0.75 };
+    for (const f of beyond) drawFigureAt(ctx, f, shift, style);
+    ctx.restore();
+
+    ctx.strokeStyle = `rgba(${INK}, 0.55)`;
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    for (const line of door.lines) traceLine(ctx, line, 0.8);
+    ctx.stroke();
   }
 
   function draw(ctx) {
@@ -217,6 +308,8 @@ export function createScene(seed = 4509) {
     // The car slides with the cursor. Moving the camera the other way does
     // it, and nearer things slide further on their own.
     cam.x = -carX * CAR_SWAY;
+
+    drawFittings(ctx);
 
     for (const f of figures) {
       cam.project(f.x, 0, f.z, foot);
